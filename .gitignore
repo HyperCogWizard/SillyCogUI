@@ -18,6 +18,7 @@ public/context/
 public/scripts/extensions/third-party/
 public/stats.json
 /uploads/
+build/
 *.jsonl
 /config.conf
 /config.yaml

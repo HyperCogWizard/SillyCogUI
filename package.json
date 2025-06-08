@@ -65,7 +65,9 @@
         "moment": "^2.30.1",
         "morphdom": "^2.7.4",
         "multer": "^2.0.0",
+        "node-addon-api": "^8.3.1",
         "node-fetch": "^3.3.2",
+        "node-gyp": "^11.2.0",
         "node-persist": "^4.0.4",
         "open": "^8.4.2",
         "png-chunk-text": "^1.0.0",
@@ -123,7 +125,9 @@
         "lint": "eslint \"src/**/*.js\" \"public/**/*.js\" ./*.js",
         "lint:fix": "eslint \"src/**/*.js\" \"public/**/*.js\" ./*.js --fix",
         "plugins:update": "node plugins update",
-        "plugins:install": "node plugins install"
+        "plugins:install": "node plugins install",
+        "build:cpp": "node-gyp rebuild",
+        "install:cpp": "npm install node-gyp -g && npm run build:cpp"
     },
     "bin": {
         "sillytavern": "./server.js"
