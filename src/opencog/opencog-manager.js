@@ -4,9 +4,16 @@
  * This module provides a bridge between SillyCogUI and OpenCog cognitive architecture,
  * enabling sophisticated chatbot interactions with reasoning, knowledge management,
  * and cognitive analysis capabilities.
+ *
+ * Phase 1: Interface Stabilization & Cognitive Surface Coupling
+ * - Enhanced with comprehensive diagnostics and monitoring
+ * - API boundary validation and error handling
+ * - Performance tracking and cognitive impedance prevention
  */
 
 import { createRequire } from 'module';
+import { createDiagnostics, DiagnosticLevel, IntegrationPhase } from './diagnostics.js';
+import { createPhaseManager } from './phase-manager.js';
 
 const require = createRequire(import.meta.url);
 
@@ -34,6 +41,22 @@ class OpenCogManager {
             confidence_threshold: 0.7,
             max_response_length: 1000,
         };
+
+        // Initialize diagnostics system
+        this.diagnostics = createDiagnostics({
+            logLevel: DiagnosticLevel.INFO,
+            enableFileLogging: false, // Can be enabled in production
+            currentPhase: IntegrationPhase.PHASE_1_STABILIZATION,
+        });
+
+        // Initialize phase manager
+        this.phaseManager = createPhaseManager(this.diagnostics);
+
+        this.diagnostics.log(DiagnosticLevel.INFO, 'MANAGER', 'OpenCog Manager initialized', {
+            nativeAvailable: this.isNativeAvailable,
+            connectionSettings: this.connectionSettings,
+            currentPhase: this.phaseManager.getCurrentPhaseInfo().phase,
+        });
     }
 
     /**
@@ -42,19 +65,42 @@ class OpenCogManager {
      * @returns {Promise<boolean>} Success status
      */
     async initialize(configPath = '') {
+        const startTime = Date.now();
+        let success = false;
+        let error = null;
+
         try {
+            this.diagnostics.log(DiagnosticLevel.INFO, 'MANAGER', 'Initializing OpenCog client', { configPath });
+            this.diagnostics.trackPhaseMilestone('client_initialization_started');
+
             if (this.isNativeAvailable) {
                 this.client = new openCogAddon.OpenCogClient();
-                return this.client.initialize(configPath);
+                console.log('Initializing OpenCog client');
+                success = this.client.initialize(configPath);
             } else {
                 // Fallback implementation for when native addon is not available
                 this.client = new FallbackOpenCogClient();
-                return this.client.initialize(configPath);
+                console.log('Using fallback OpenCog implementation');
+                success = this.client.initialize(configPath);
             }
-        } catch (error) {
-            console.error('Failed to initialize OpenCog client:', error);
-            return false;
+
+            if (success) {
+                this.diagnostics.trackPhaseMilestone('client_initialization_completed', true, {
+                    clientType: this.isNativeAvailable ? 'native' : 'fallback',
+                });
+            }
+
+        } catch (err) {
+            error = err;
+            success = false;
+            this.diagnostics.log(DiagnosticLevel.ERROR, 'MANAGER', 'Client initialization failed', { error: err.message });
+            console.error('Failed to initialize OpenCog client:', err);
+        } finally {
+            const endTime = Date.now();
+            this.diagnostics.trackApiCall('initialize', startTime, endTime, success, error);
         }
+
+        return success;
     }
 
     /**
@@ -64,14 +110,41 @@ class OpenCogManager {
      * @returns {Promise<boolean>} Connection status
      */
     async connect(endpoint = this.connectionSettings.endpoint, port = this.connectionSettings.port) {
-        if (!this.client) {
-            throw new Error('OpenCog client not initialized');
+        const startTime = Date.now();
+        let success = false;
+        let error = null;
+
+        try {
+            if (!this.client) {
+                throw new Error('OpenCog client not initialized');
+            }
+
+            this.diagnostics.log(DiagnosticLevel.INFO, 'MANAGER', 'Attempting connection', { endpoint, port });
+            this.diagnostics.trackPhaseMilestone('connection_attempt_started');
+
+            this.connectionSettings.endpoint = endpoint;
+            this.connectionSettings.port = port;
+
+            success = this.client.connect(endpoint, port);
+
+            if (success) {
+                console.log('Connected to OpenCog successfully!');
+                this.diagnostics.trackPhaseMilestone('connection_established', true, { endpoint, port });
+            } else {
+                this.diagnostics.log(DiagnosticLevel.WARN, 'MANAGER', 'Connection failed', { endpoint, port });
+            }
+
+        } catch (err) {
+            error = err;
+            success = false;
+            this.diagnostics.log(DiagnosticLevel.ERROR, 'MANAGER', 'Connection error', { error: err.message, endpoint, port });
+        } finally {
+            const endTime = Date.now();
+            this.diagnostics.trackConnection(endpoint, port, success, error);
+            this.diagnostics.trackApiCall('connect', startTime, endTime, success, error);
         }
 
-        this.connectionSettings.endpoint = endpoint;
-        this.connectionSettings.port = port;
-
-        return this.client.connect(endpoint, port);
+        return success;
     }
 
     /**
@@ -101,23 +174,62 @@ class OpenCogManager {
      * @returns {Promise<Object>} OpenCog response
      */
     async sendMessage(message, role = 'user') {
-        if (!this.client) {
-            throw new Error('OpenCog client not initialized');
+        const startTime = Date.now();
+        let success = false;
+        let error = null;
+        let response = null;
+
+        try {
+            if (!this.client) {
+                throw new Error('OpenCog client not initialized');
+            }
+
+            if (!this.isConnected()) {
+                throw new Error('Not connected to OpenCog');
+            }
+
+            this.diagnostics.log(DiagnosticLevel.DEBUG, 'MANAGER', 'Processing message', {
+                messageLength: message ? message.length : 0,
+                role,
+            });
+
+            response = this.client.sendMessage(message, role);
+            success = true;
+
+            // Track cognitive processing metrics
+            const concepts = await this.queryConcepts('');  // Get current concepts for tracking
+            this.diagnostics.trackCognitiveProcessing(
+                message ? message.length : 0,
+                response.content ? response.content.length : 0,
+                response.confidence || 0,
+                Date.now() - startTime,
+                concepts,
+            );
+
+            // Enhance response with SillyCogUI-specific formatting
+            const enhancedResponse = {
+                ...response,
+                timestamp: new Date().toISOString(),
+                source: 'opencog',
+                formatted: this.formatResponseForSillyCog(response),
+            };
+
+            this.diagnostics.log(DiagnosticLevel.DEBUG, 'MANAGER', 'Message processed successfully', {
+                confidence: response.confidence,
+                responseLength: response.content ? response.content.length : 0,
+            });
+
+            return enhancedResponse;
+
+        } catch (err) {
+            error = err;
+            success = false;
+            this.diagnostics.log(DiagnosticLevel.ERROR, 'MANAGER', 'Message processing failed', { error: err.message });
+            throw err;
+        } finally {
+            const endTime = Date.now();
+            this.diagnostics.trackApiCall('sendMessage', startTime, endTime, success, error);
         }
-
-        if (!this.isConnected()) {
-            throw new Error('Not connected to OpenCog');
-        }
-
-        const response = this.client.sendMessage(message, role);
-
-        // Enhance response with SillyCogUI-specific formatting
-        return {
-            ...response,
-            timestamp: new Date().toISOString(),
-            source: 'opencog',
-            formatted: this.formatResponseForSillyCog(response),
-        };
     }
 
     /**
@@ -257,6 +369,99 @@ class OpenCogManager {
     isNativeAddonAvailable() {
         return this.isNativeAvailable;
     }
+
+    /**
+     * Get diagnostic report
+     * @returns {Object} Comprehensive diagnostic report
+     */
+    getDiagnosticReport() {
+        return this.diagnostics.generateDiagnosticReport();
+    }
+
+    /**
+     * Set diagnostic log level
+     * @param {number} level Diagnostic level (DiagnosticLevel enum)
+     */
+    setDiagnosticLevel(level) {
+        this.diagnostics.logLevel = level;
+        this.diagnostics.log(DiagnosticLevel.INFO, 'MANAGER', 'Diagnostic level changed', { newLevel: level });
+    }
+
+    /**
+     * Enable or disable file logging
+     * @param {boolean} enabled Enable file logging
+     * @param {string} logDirectory Optional log directory path
+     */
+    setFileLogging(enabled, logDirectory = './logs/opencog') {
+        this.diagnostics.enableFileLogging = enabled;
+        if (enabled && logDirectory) {
+            this.diagnostics.logDirectory = logDirectory;
+            this.diagnostics.initializeLogging();
+        }
+        this.diagnostics.log(DiagnosticLevel.INFO, 'MANAGER', 'File logging configuration changed', {
+            enabled,
+            logDirectory,
+        });
+    }
+
+    /**
+     * Set integration phase
+     * @param {string} phase Integration phase (IntegrationPhase enum)
+     */
+    setIntegrationPhase(phase) {
+        this.diagnostics.setPhase(phase);
+        this.diagnostics.log(DiagnosticLevel.INFO, 'MANAGER', 'Integration phase changed', { phase });
+    }
+
+    /**
+     * Track custom milestone
+     * @param {string} milestone Milestone name
+     * @param {boolean} completed Completion status
+     * @param {Object} data Additional data
+     */
+    trackMilestone(milestone, completed = true, data = {}) {
+        this.diagnostics.trackPhaseMilestone(milestone, completed, data);
+    }
+
+    /**
+     * Get current phase information
+     * @returns {Object} Current phase information with progress
+     */
+    getCurrentPhaseInfo() {
+        return this.phaseManager.getCurrentPhaseInfo();
+    }
+
+    /**
+     * Generate comprehensive phase report
+     * @returns {Object} Complete phase report with recommendations
+     */
+    generatePhaseReport() {
+        return this.phaseManager.generatePhaseReport();
+    }
+
+    /**
+     * Advance to next phase if criteria are met
+     * @returns {boolean} Whether phase advancement was successful
+     */
+    advanceToNextPhase() {
+        return this.phaseManager.advanceToNextPhase();
+    }
+
+    /**
+     * Assess readiness for next phase
+     * @returns {Object} Detailed readiness assessment
+     */
+    assessPhaseReadiness() {
+        return this.phaseManager.assessReadinessForNextPhase();
+    }
+
+    /**
+     * Manually transition to specific phase (use with caution)
+     * @param {string} phase Target phase
+     */
+    transitionToPhase(phase) {
+        this.phaseManager.transitionToPhase(phase);
+    }
 }
 
 /**
@@ -363,4 +568,6 @@ function createOpenCogManager() {
 export {
     OpenCogManager,
     createOpenCogManager,
+    DiagnosticLevel,
+    IntegrationPhase,
 };
